@@ -1,219 +1,342 @@
 import React, { useState } from 'react';
 import './index.css';
 
-const DashboardBox = ({ title, value, detail, confidence, color, children, showRaw, rawData, onAdjust }) => (
-  <div className="box">
-    <div className="box-header">
-      <span className="box-title">{title}</span>
-      {confidence && <span className="confidence-chip">{confidence}</span>}
-    </div>
-    <div className="result-value" style={{ color: color || 'white' }}>
-      {value}
-    </div>
-    <div style={{ color: 'var(--text-secondary)', fontSize: '0.9rem' }}>
-      {detail}
-    </div>
-
-    {children}
-
-    {onAdjust && (
-      <div className="manual-adjust">
-        <label style={{ fontSize: '0.7rem', color: 'var(--text-secondary)' }}>Manual Multiplier: </label>
-        <input
-          type="range" min="0.5" max="2.0" step="0.1" defaultValue="1.0"
-          onChange={(e) => onAdjust(parseFloat(e.target.value))}
-          style={{ width: '100%', accentColor: 'var(--accent-primary)', height: '10px' }}
-        />
-      </div>
-    )}
-
-    {showRaw && rawData && (
-      <div className="raw-data">
-        <pre>{JSON.stringify(rawData, null, 2)}</pre>
-      </div>
-    )}
-  </div>
-);
+const PRESETS = [
+  { label: 'Framer (Series C)', url: 'framer.com' },
+  { label: 'Stripe (Pre-IPO)', url: 'stripe.com' },
+  { label: 'Webflow ($335M)', url: 'webflow.com' },
+  { label: 'Linear ($52M)', url: 'linear.app' },
+  { label: 'Crisp (Bootstrapped)', url: 'crisp.chat' },
+];
 
 function App() {
   const [url, setUrl] = useState('');
   const [loading, setLoading] = useState(false);
   const [data, setData] = useState(null);
-  const [showRaw, setShowRaw] = useState(false);
-  const [adjustments, setAdjustments] = useState({
-    traffic: 1.0,
-    social: 1.0,
-    brand: 1.0
-  });
+  const [error, setError] = useState(null);
+  const [copied, setCopied] = useState(false);
 
-  const analyze = async () => {
-    if (!url) return;
+  const analyze = async (targetUrl) => {
+    const query = targetUrl || url;
+    if (!query) return;
     setLoading(true);
+    setError(null);
+
     try {
-      const response = await fetch('http://localhost:5000/api/analyze', {
+      const res = await fetch('http://localhost:5001/api/analyze', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ url })
+        body: JSON.stringify({ url: query })
       });
-      const result = await response.json();
-      setData(result);
-    } catch (error) {
-      console.error(error);
-      alert('Analysis failed');
+      const json = await res.json();
+      if (json.error) {
+        setError(json.error);
+      } else {
+        setData(json);
+        if (!targetUrl) setUrl(query);
+      }
+    } catch {
+      setError('Cannot connect to backend server on port 5001.');
     } finally {
       setLoading(false);
     }
   };
 
-  const handleAdjust = (type, val) => {
-    setAdjustments(prev => ({ ...prev, [type]: val }));
-  };
+  const copyBrief = () => {
+    if (!data) return;
+    const brief = `=== LEAD EVALUATION: ${data.identity.brand || data.domain} ===
+Verdict: ${data.qualification.status} (${data.qualification.score}/100)
+Action: ${data.qualification.action}
 
-  const calculateFinalScore = () => {
-    if (!data) return 0;
-    const base = data.decision.score;
-    const adjusted = base * adjustments.traffic * adjustments.social * adjustments.brand;
-    return Math.min(100, Math.round(adjusted));
+Financials:
+• Team Size: ${data.companyProfile.teamSize}
+• Location: ${data.companyProfile.location}
+• Funding: ${data.companyProfile.funding.stage} (${data.companyProfile.funding.totalRaised})
+• Investors: ${data.companyProfile.funding.leadInvestors.join(', ')}
+• Est. SaaS Spend: ${data.qualification.estimatedSaaSBudget}
+
+Founders:
+${data.founders.map(f => `• ${f.name} (${f.role}) - ${f.linkedin || 'No LinkedIn'}`).join('\n')}
+
+Math Formula:
+${data.mathCalculation.formula}`;
+
+    navigator.clipboard.writeText(brief);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
   };
 
   return (
-    <div className="App">
-      <div className="header">
-        <h1>Nois.pro</h1>
-        <p>Code Export Lead Intelligence System (Free Version)</p>
-      </div>
+    <div className="container">
+      {/* Header */}
+      <header className="header">
+        <div className="brand">
+          <span className="logo">⚡</span>
+          <div>
+            <h1>LeadVal</h1>
+            <p>Will they afford your premium service? Know before the meeting.</p>
+          </div>
+        </div>
+      </header>
 
-      <div className="dashboard">
-        <div className="url-input-container">
+      {/* Simple Search Input */}
+      <div className="search-box">
+        <form onSubmit={(e) => { e.preventDefault(); analyze(); }} className="search-bar">
           <input
             type="text"
-            placeholder="Enter website URL (e.g. framer.com, webflow.com)"
+            placeholder="Enter website URL (e.g. framer.com, stripe.com, crisp.chat)..."
             value={url}
             onChange={(e) => setUrl(e.target.value)}
+            disabled={loading}
           />
-          <button onClick={analyze} disabled={loading}>
-            {loading ? 'Analyzing...' : 'Deep Scan'}
+          <button type="submit" disabled={loading || !url}>
+            {loading ? 'Scanning...' : 'Check Lead'}
           </button>
-          <button
-            onClick={() => setShowRaw(!showRaw)}
-            style={{ background: 'rgba(255,255,255,0.1)', border: '1px solid var(--card-border)' }}
-          >
-            {showRaw ? 'Hide Raw' : 'Show Raw'}
-          </button>
-        </div>
+        </form>
 
-        {data && !data.error ? (
-          <>
-            <DashboardBox
-              title="1. Identity & Platform"
-              value={data.platform || 'Unknown'}
-              detail={data.identity?.title || 'No title found'}
-              confidence="100%"
-              color="var(--accent-primary)"
-              showRaw={showRaw}
-              rawData={data.identity}
-            />
-
-            <DashboardBox
-              title="2. Cost Estimation"
-              value={`~$${data.costEstimation?.cost || 0}/mo`}
-              detail={`Likely on ${data.costEstimation?.plan || 'Unknown'} plan`}
-              confidence={data.costEstimation?.confidence}
-              color="var(--warning)"
-              showRaw={showRaw}
-              rawData={data.costEstimation}
-            />
-
-            <DashboardBox
-              title="3. Website Traffic"
-              value={data.traffic?.tier || 'Low'}
-              detail={`Range: ${data.traffic?.range || '< 10k'} visits. ${data.traffic?.scripts || 0} scripts detected.`}
-              confidence="Heuristic"
-              color="var(--accent-secondary)"
-              showRaw={showRaw}
-              rawData={data.traffic}
-              onAdjust={(val) => handleAdjust('traffic', val)}
-            />
-
-            <DashboardBox
-              title="4. Social Intelligence"
-              value={`Score: ${data.social?.score || 0}/100`}
-              detail={`${data.social?.linksCount || 0} platforms detected. Status: ${data.social?.status || 'Active'}`}
-              confidence="Heuristic"
-              color="var(--accent-primary)"
-              showRaw={showRaw}
-              rawData={data.social}
-              onAdjust={(val) => handleAdjust('social', val)}
-            />
-
-            <DashboardBox
-              title="5. Combined Audience"
-              value={`${Math.round(((data.social?.score || 0) * 0.4 + (data.traffic?.score || 0) * 0.6) * adjustments.traffic * adjustments.social)}/100`}
-              detail="Weighted Traffic (0.6) + Social (0.4)"
-              confidence="Calc + Manual"
-              color="var(--success)"
-            />
-
-            <DashboardBox
-              title="6. Technical Eligibility"
-              value={data.eligibility?.status || 'Review Needed'}
-              detail={data.eligibility?.staticFit ? "Static / Content focus" : "Dynamic / SPA complexity"}
-              confidence="Hard Gate"
-              color={data.eligibility?.staticFit ? "var(--success)" : "var(--danger)"}
-              showRaw={showRaw}
-              rawData={data.eligibility}
-            />
-
-            <DashboardBox
-              title="7. Business & Funding"
-              value={data.business?.founderFound ? "Founder Detected" : "Team Scan Active"}
-              detail={`Estimated Size: ${data.business?.teamSize || '1-5'}. Funding Signal: ${data.business?.funding ? 'Yes' : 'No'}`}
-              confidence="Heuristic"
-              color="var(--accent-secondary)"
-              showRaw={showRaw}
-              rawData={data.business}
-            />
-
-            <DashboardBox
-              title="8. Revenue Band"
-              value={data.revenue?.band || '< $100k'}
-              detail="Estimated based on traffic and platform complexity"
-              confidence="Derived"
-              color="var(--warning)"
-              showRaw={showRaw}
-              rawData={data.revenue}
-            />
-
-            <DashboardBox
-              title="9. Final Export Fit"
-              value={calculateFinalScore() > 70 ? 'Excellent' : 'Manual Review'}
-              detail={data.decision?.action || 'Manual review recommended'}
-              confidence={`Total Score: ${calculateFinalScore()}/100`}
-              color={calculateFinalScore() > 70 ? "var(--success)" : "var(--warning)"}
+        <div className="presets">
+          <span className="presets-title">Try sample:</span>
+          {PRESETS.map((p) => (
+            <button
+              key={p.url}
+              type="button"
+              className="preset-btn"
+              onClick={() => { setUrl(p.url); analyze(p.url); }}
+              disabled={loading}
             >
-              <div className="manual-adjust" style={{ marginTop: '1rem', borderTop: 'none' }}>
-                <p style={{ fontSize: '0.9rem', color: 'white', fontWeight: '600' }}>{data.decision?.pitch || 'Export fit scan complete.'}</p>
-                <div style={{ marginTop: '1rem' }}>
-                  <label style={{ fontSize: '0.7rem', color: 'var(--text-secondary)' }}>Brand Quality: </label>
-                  <input
-                    type="range" min="0.5" max="2.0" step="0.1" defaultValue="1.0"
-                    onChange={(e) => handleAdjust('brand', parseFloat(e.target.value))}
-                    style={{ width: '100%', accentColor: 'var(--accent-secondary)', height: '10px' }}
-                  />
+              {p.label}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* Error */}
+      {error && <div className="error-banner">⚠️ {error}</div>}
+
+      {/* Results View */}
+      {data && (
+        <div className="results">
+          {/* Main Verdict Card */}
+          <div className={`verdict-card ${data.qualification.score >= 75 ? 'pass' : data.qualification.score >= 52 ? 'review' : 'fail'}`}>
+            <div className="verdict-top">
+              <div>
+                <span className="verdict-tag">MEETING VERDICT</span>
+                <h2 className="verdict-status">
+                  {data.qualification.score >= 75 ? '✅' : data.qualification.score >= 52 ? '⚠️' : '❌'}{' '}
+                  {data.qualification.status}
+                </h2>
+                <p className="verdict-action">{data.qualification.action}</p>
+              </div>
+
+              <div className="score-pill">
+                <span className="score-number">{data.qualification.score}</span>
+                <span className="score-max">/100</span>
+              </div>
+            </div>
+
+            {/* Quick Metrics */}
+            <div className="quick-stats">
+              <div className="stat">
+                <span className="stat-label">LOCATION</span>
+                <span className="stat-val">{data.companyProfile.location}</span>
+              </div>
+              <div className="stat">
+                <span className="stat-label">TEAM SIZE</span>
+                <span className="stat-val">{data.companyProfile.teamSize}</span>
+              </div>
+              <div className="stat">
+                <span className="stat-label">FUNDING STAGE</span>
+                <span className="stat-val">{data.companyProfile.funding.stage}</span>
+              </div>
+              <div className="stat">
+                <span className="stat-label">EST. SAAS SPEND</span>
+                <span className="stat-val">{data.qualification.estimatedSaaSBudget}</span>
+              </div>
+            </div>
+
+            <div className="verdict-footer">
+              <button onClick={copyBrief} className="btn-secondary">
+                {copied ? '✓ Copied Brief to Clipboard' : '📋 Copy Meeting Brief'}
+              </button>
+              <a href={data.url} target="_blank" rel="noopener noreferrer" className="btn-link">
+                Open {data.domain} &rarr;
+              </a>
+            </div>
+          </div>
+
+          {/* Section 1: Math Score Breakdown */}
+          <section className="section">
+            <div className="section-header">
+              <h3>🧮 Math Point Breakdown</h3>
+              <span className="formula-chip">{data.mathCalculation.formula}</span>
+            </div>
+
+            <table className="simple-table">
+              <thead>
+                <tr>
+                  <th>Category</th>
+                  <th>Weight</th>
+                  <th>Points</th>
+                  <th>Evidence</th>
+                </tr>
+              </thead>
+              <tbody>
+                {data.mathCalculation.scorecard.map((item, idx) => (
+                  <tr key={idx}>
+                    <td className="bold">{item.category}</td>
+                    <td className="muted">{item.weight}</td>
+                    <td className="bold">{item.pointsEarned} / {item.maxPoints}</td>
+                    <td className="evidence">{item.proof}</td>
+                  </tr>
+                ))}
+                {data.redFlags.length > 0 && (
+                  <tr className="penalty">
+                    <td className="bold text-danger">🚨 Red Flag Deductions</td>
+                    <td className="muted">-</td>
+                    <td className="bold text-danger">-{data.mathCalculation.totalPenalties}</td>
+                    <td className="evidence text-danger">
+                      {data.redFlags.map(r => `${r.title} (-${r.deduction}pts)`).join(', ')}
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </section>
+
+          {/* Section 2: Founders & Leadership */}
+          <section className="section">
+            <div className="section-header">
+              <h3>👥 Founders & Key Decision Makers</h3>
+              <span className="badge">{data.founders.length} Identified</span>
+            </div>
+
+            <div className="founders-list">
+              {data.founders.map((founder, idx) => (
+                <div key={idx} className="founder-item">
+                  <div className="founder-avatar">
+                    {founder.name.split(' ').map(n => n[0]).join('').slice(0, 2)}
+                  </div>
+                  <div className="founder-info">
+                    <h4>{founder.name}</h4>
+                    <span className="founder-role">{founder.role}</span>
+                    <p className="founder-bio">{founder.bio}</p>
+                  </div>
+                  <div className="founder-buttons">
+                    {founder.linkedin && (
+                      <a href={founder.linkedin} target="_blank" rel="noopener noreferrer" className="social-btn">
+                        LinkedIn
+                      </a>
+                    )}
+                    {founder.twitter && (
+                      <a href={founder.twitter} target="_blank" rel="noopener noreferrer" className="social-btn">
+                        Twitter / X
+                      </a>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </section>
+
+          {/* Section 3: Ad Video Links & Metrics */}
+          <section className="section">
+            <div className="section-header">
+              <h3>🎬 Ad Videos & Acquisition Creatives</h3>
+              <span className="badge">{data.advertising.socialVideos.totalPosted} Videos Published</span>
+            </div>
+
+            <div className="ad-links-bar">
+              <span className="ad-links-title">Inspect Live Ad Libraries:</span>
+              <a href={data.advertising.adLibraryLinks.meta} target="_blank" rel="noopener noreferrer" className="ad-link-btn">
+                Meta (FB/IG) Ad Library &rarr;
+              </a>
+              <a href={data.advertising.adLibraryLinks.google} target="_blank" rel="noopener noreferrer" className="ad-link-btn">
+                Google Ads Transparency &rarr;
+              </a>
+              <a href={data.advertising.adLibraryLinks.tiktok} target="_blank" rel="noopener noreferrer" className="ad-link-btn">
+                TikTok Creative Center &rarr;
+              </a>
+            </div>
+
+            <div className="videos-grid">
+              {data.advertising.socialVideos.creatives.map((video, idx) => (
+                <div key={idx} className="video-card">
+                  <div className="video-top">
+                    <span className="video-platform">{video.platform}</span>
+                    <span className="video-eng">{video.engagement} Eng.</span>
+                  </div>
+                  <h4 className="video-title">{video.title}</h4>
+                  <p className="video-hook">&ldquo;{video.hook}&rdquo;</p>
+                  <div className="video-stats">
+                    <div>
+                      <span className="v-lbl">VIEWS</span>
+                      <strong className="v-val">{video.views}</strong>
+                    </div>
+                    <div>
+                      <span className="v-lbl">LIKES</span>
+                      <strong className="v-val">{video.likes}</strong>
+                    </div>
+                    <div>
+                      <span className="v-lbl">COMMENTS</span>
+                      <strong className="v-val">{video.comments}</strong>
+                    </div>
+                  </div>
+                  <a href={video.url} target="_blank" rel="noopener noreferrer" className="video-btn">
+                    View Creative &rarr;
+                  </a>
+                </div>
+              ))}
+            </div>
+          </section>
+
+          {/* Section 4: Funding & Tech Stack */}
+          <section className="section">
+            <div className="section-header">
+              <h3>💰 Capital, Funding & Software Stack</h3>
+              <span className="badge">{data.companyProfile.funding.stage}</span>
+            </div>
+
+            <div className="details-grid">
+              <div className="detail-box">
+                <span className="detail-lbl">TOTAL CAPITAL RAISED</span>
+                <strong className="detail-val">{data.companyProfile.funding.totalRaised}</strong>
+                <span className="detail-sub">
+                  Backers: {data.companyProfile.funding.leadInvestors.join(', ')}
+                </span>
+              </div>
+
+              <div className="detail-box">
+                <span className="detail-lbl">ACTIVE AD PIXELS</span>
+                <strong className="detail-val">
+                  {data.advertising.hasActiveAdSpend ? `${data.advertising.adPixels.length} Active` : 'None'}
+                </strong>
+                <span className="detail-sub">
+                  {data.advertising.adPixels.join(', ') || 'No retargeting tags found'}
+                </span>
+              </div>
+
+              <div className="detail-box full-width">
+                <span className="detail-lbl">DETECTED TECH STACK</span>
+                <div className="tech-tags">
+                  <span className="tech-tag primary">{data.techStack.platform}</span>
+                  {data.techStack.detectedTools.map((t, idx) => (
+                    <span key={idx} className="tech-tag">
+                      {t.name} ({t.tier})
+                    </span>
+                  ))}
                 </div>
               </div>
-            </DashboardBox>
-          </>
-        ) : data?.error ? (
-          <div style={{ gridColumn: '1/-1', textAlign: 'center', color: 'var(--danger)', padding: '4rem' }}>
-            Error: {data.error}
-          </div>
-        ) : (
-          <div style={{ gridColumn: '1/-1', textAlign: 'center', color: 'var(--text-secondary)', padding: '4rem' }}>
-            Enter a URL and start the scan to see all 9 intelligence boxes
-          </div>
-        )}
-      </div>
+            </div>
+          </section>
+        </div>
+      )}
+
+      {/* Empty State */}
+      {!data && !loading && !error && (
+        <div className="empty-state">
+          <p>Enter any website above to instantly see if they have the budget for your premium service.</p>
+        </div>
+      )}
     </div>
   );
 }
